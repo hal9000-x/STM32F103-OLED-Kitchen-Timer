@@ -2,7 +2,9 @@
 // SH1106 OLED
 // OLED SCL --> B6, OLED SDA --> B7, OLED VCC --> 5V, OLED GND --> GND
 // BTN MENU --> A7, BTN [-] --> A3, BTN [+] --> A0. All three common pins of each buttons are connected with GND
+// BUZZER [+] --> A2, BUZZER [-] --> GND
 // AsifAlam.com
+
 
 
 #include "U8glib.h"
