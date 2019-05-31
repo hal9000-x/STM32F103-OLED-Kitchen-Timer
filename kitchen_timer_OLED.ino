@@ -1,227 +1,254 @@
-// STM32 Blue Pill based Kitchen Timer V1.0
-// SH1106 OLED
-// OLED SCL --> B6, OLED SDA --> B7, OLED VCC --> 5V, OLED GND --> GND
-// BTN MENU --> A7, BTN [-] --> A3, BTN [+] --> A0. All three common pins of each buttons are connected with GND
-// BUZZER [+] --> A2, BUZZER [-] --> GND
-// AsifAlam.com
-
-
-
-#include "U8glib.h"
-
 #include <SPI.h>
 #include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306_STM32.h>
+
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
 
 #include "pitches.h"
 
-U8GLIB_SH1106_128X64 u8g(5, 4, 10, 6 , 3);
-
-unsigned int min_c = 0;
-unsigned int sec_c = 10;
-
-boolean blink_all = false;
-volatile int state = 2; // 1 == set min, 2 = set sec, 3 = counting, 4 = time up
-
-int menu_select = 2;
+#if (SSD1306_LCDHEIGHT != 64)
+#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#endif
 
 char buf1[4];
 char buf2[4];
 
-const int btn_up = 7;
-const int btn_down =  8;
+unsigned int min_c_set = 5;
+unsigned int min_c = 5;
+unsigned int sec_c = 00;
 
-const int speaker_pin = 9;
-const int melody[] = {NOTE_C4, NOTE_G3, NOTE_G3, NOTE_A3, NOTE_G3, 0, NOTE_B3, NOTE_C4};
-const int noteDurations[] = {4, 8, 8, 4, 4, 4, 4, 4};
+int state = 1; // 1 == set min, 2 = set sec, 3 = counting, 4 = time up
+boolean blink_s = true;
 
-void draw(void) {
+boolean beep_sound = true;
 
-  if (!blink_all && state == 3)
-  {
-    //u8g.setFont(u8g_font_unifont);
-    //u8g.setFont(u8g_font_osb35);
-    u8g.setFont(u8g_font_fub35n);
+const int speaker_pin = A2;
 
+unsigned long lastInterrupt;
+unsigned long last_ms;
 
+void setup()   {                
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // initialize with the I2C addr 0x3D (for the 128x64)
+  display.clearDisplay();
 
-    //Serial.print(min_c);
-    //Serial.println(sec_c);
+  pinMode(A7, INPUT_PULLUP);
+  attachInterrupt(A7, show_menu, LOW);
 
-    sprintf (buf1, "%02i", min_c);
-    u8g.drawStr(0, 36, buf1);
+  pinMode(A3, INPUT_PULLUP);
+  attachInterrupt(A3, count_down, LOW);
 
-    u8g.drawStr( 56, 30, ":");
+  pinMode(A0, INPUT_PULLUP);
+  attachInterrupt(A0, count_up, LOW);
 
-    sprintf (buf2, "%02i", sec_c);
-    u8g.drawStr(73, 36, buf2);
-  }
-  else if (state == 1)
-  {
-    u8g.setFont(u8g_font_fub35n);
-    sprintf (buf1, "%02i", min_c);
-    u8g.drawStr(0, 36, buf1);
-
-    u8g.drawStr( 56, 30, ":");
-  }
-  else if (state == 2)
-  {
-    u8g.setFont(u8g_font_fub35n);
-
-    u8g.drawStr( 56, 30, ":");
-    sprintf (buf2, "%02i", sec_c);
-    u8g.drawStr(73, 36, buf2);
-  }
-  else
-  {
-    u8g.setFont(u8g_font_fub35n);
-
-    sprintf (buf1, "%02i", min_c);
-    u8g.drawStr(0, 36, buf1);
-
-    u8g.drawStr( 56, 30, ":");
-
-    sprintf (buf2, "%02i", sec_c);
-    u8g.drawStr(73, 36, buf2);
-
-    u8g.setFont(u8g_font_unifont);
-    u8g.setScale2x2();
-    u8g.drawStr(0, 31, "TIME UP!");
-    u8g.undoScale();
-  }
+  tone(speaker_pin, NOTE_C7, 100);
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(0,0);
+  display.println("AsifAlam.com");
+  display.setTextSize(2); 
+  display.setCursor(0,25);
+  display.println("TIMER V1.0");
+  display.display();
+  delay(3000);
 }
 
-void blink() {
-  tone(9, NOTE_A1, 5);
-  if (state == 0)
-  {
-    state = 1;
-  }
-  else if (state == 1)
-  {
-    state = 2;
-  }
-  else if (state == 2)
-  {
-    blink_all = false;
-    state = 3;
-  }
-  else if (state == 3)
-  {
-    state = 1;
-  }
-  Serial.println(state);
-}
-
-void setup(void) {
-
-  Serial.begin(9600);
-  Serial.println(u8g.getMode());
-  u8g.setColorIndex(1);
-
-  pinMode(btn_up, INPUT_PULLUP);
-  pinMode(btn_down, INPUT_PULLUP);
-
-  pinMode(menu_select, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(menu_select), blink, LOW);
-
-  // flip screen, if required
-  // u8g.setRot180();
-
-  // set SPI backup if required
-  //u8g.setHardwareBackup(u8g_backup_avr_spi);
-
-  // assign default color value
-  /*if ( u8g.getMode() == U8G_MODE_R3G3B2 ) {
-    u8g.setColorIndex(255);     // white
-    }
-    else if ( u8g.getMode() == U8G_MODE_GRAY2BIT ) {
-    u8g.setColorIndex(3);         // max intensity
-    }
-    else if ( u8g.getMode() == U8G_MODE_BW ) {
-    u8g.setColorIndex(1);         // pixel on
-    }
-    else if ( u8g.getMode() == U8G_MODE_HICOLOR ) {
-    u8g.setHiColorByRGB(255,255,255);
-    }*/
-}
-
-void callback()
+void show_menu()
 {
-  u8g.firstPage();
-  do {
-    draw();
-  } while ( u8g.nextPage() );
+  if(millis() - lastInterrupt > 500)
+  {    
+    lastInterrupt = millis();
+    if(state == 4)
+    {
+      state = 1;
+      min_c = min_c_set;
+      tone(speaker_pin, NOTE_DS7, 100);
+    }
+    else if(state == 3)
+    {
+      state = 1;
+      tone(speaker_pin, NOTE_E3, 300);
+    }
+    else if(state == 1)
+    {
+      state = 2;
+      sec_c = 0;
+      tone(speaker_pin, NOTE_DS7, 100);
+    }
+    else if(state == 2)
+    {
+      if(min_c == 0 && sec_c == 0)
+      {
+        state = 1;
+        tone(speaker_pin, NOTE_GS1, 50);
+      }
+      else
+      {
+        state = 3;
+        tone(speaker_pin, NOTE_FS6, 400);
+      }
+    }
+  }
 }
 
-void loop() {
-
-  if (state == 3)
-  {
-    if (min_c == 0 && sec_c == 0)
+void count_down()
+{
+  if(millis() - lastInterrupt > 200)
+  { 
+    blink_s = true;
+    last_ms = millis();   
+    lastInterrupt = millis();
+    if(state == 1 && min_c > 0)
     {
-      if (blink_all)
-        blink_all = false;
-      else
-        blink_all = true;
-        play_music();
-        delay(500);
+      min_c --;
+      min_c_set = min_c;
+    }
+    else if(state == 2 && sec_c > 0)
+    {
+      sec_c --;
+    }
+    else if(state == 3)
+    {
+      beep_sound = false;
+    }
+    tone(speaker_pin, NOTE_D6, 100);
+  }
+}
+
+void count_up()
+{
+  if(millis() - lastInterrupt > 200)
+  { 
+    blink_s = true;
+    last_ms = millis();   
+    lastInterrupt = millis();
+    if(state == 1 && min_c < 99)
+    {
+      min_c ++;
+      min_c_set = min_c;
+    }
+    else if(state == 2 && sec_c < 58)
+    {
+      sec_c ++;
+    }
+    else if(state == 3)
+    {
+      beep_sound = true;
+    }
+    tone(speaker_pin, NOTE_E6, 100);
+  }
+}
+
+void draw()
+{
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  
+  if(state == 4)
+  {
+    if(blink_s)
+    {
+      display.setTextSize(2);
+      display.setCursor(17,0);
+      display.println("TIME UP!");
+      blink_s = false;
     }
     else
     {
-      sec_c --;
-      if (sec_c == -1)
+      blink_s = true;
+    }
+    play_music();
+  }
+  else if(state == 3)
+  {
+    display.setTextSize(2);
+    display.setCursor(17,0);
+    display.println("Timer ON");
+  }
+  else if(state == 1)
+  {
+    display.setTextSize(2);
+    display.setCursor(17,0);
+    display.println("Set Min:");
+  }
+  else if(state == 2)
+  {
+    display.setTextSize(2);
+    display.setCursor(17,0);
+    display.println("Set Sec:");
+  }
+
+  
+  display.setTextSize(4);
+  if(state == 1 && !blink_s)
+  {
+    
+  }
+  else{
+    // 16 is the top blue
+    display.setCursor(5,25);
+    sprintf (buf1, "%02i", min_c);
+    display.print(buf1);
+  }
+
+  display.setCursor(55,25);
+  display.print(":");
+
+  if(state == 2 && !blink_s)
+  {
+    
+  }
+  else{
+    display.setCursor(80,25);
+    sprintf (buf2, "%02i", sec_c);
+    display.print(buf2);
+  }
+  
+  display.display();
+}
+
+void loop() {
+  if(state == 3)
+  {
+    if(min_c == 0 && sec_c == 0)
+    {
+      state = 4;
+      delay(400);
+    }
+    else
+    {
+      if(last_ms+990 <= millis())
       {
-        sec_c = 59;
-        min_c --;
+        last_ms = millis();
+        sec_c --;
+        if (sec_c == -1)
+        {
+          sec_c = 59;
+          min_c --;
+        }
+        if(beep_sound)
+        {
+          tone(speaker_pin, NOTE_C7, 100);
+        }
       }
-      delay(1000);
     }
   }
-  else if (state == 1)
+  else if(state == 1 || state == 2)
   {
-    if(digitalRead(btn_up) == LOW)
+    if(last_ms+500 <= millis())
     {
-      tone(speaker_pin, NOTE_B3, 4);
-      if(min_c<99)
-      min_c ++;
+      last_ms = millis();
+      blink_s = !blink_s;
     }
-    else if(digitalRead(btn_down) == LOW)
-    {
-      tone(speaker_pin, NOTE_D3, 4);
-      if(min_c>0)
-      min_c --;
-    }
+    
   }
-  else if (state == 2)
-  {
-    if(digitalRead(btn_up) == LOW)
-    {
-      tone(speaker_pin, NOTE_B3, 4);
-      if(sec_c<59)
-      sec_c ++;
-    }
-    else if(digitalRead(btn_down) == LOW)
-    {
-      tone(speaker_pin, NOTE_D3, 4);
-      if(sec_c>0)
-      sec_c --;
-    }
-  }
-
-
-  callback();
-
+  draw();
 }
 
 void play_music()
 {
-  for (int thisNote = 0; thisNote < 8; thisNote++) {
-
-    int noteDuration = 1000 / noteDurations[thisNote];
-    tone(speaker_pin, melody[thisNote], noteDuration);
-
-    int pauseBetweenNotes = noteDuration * 1.30;
-    delay(pauseBetweenNotes);
-    noTone(speaker_pin);
-  }
+  tone(speaker_pin, NOTE_E5, 400);
+  delay(650);
 }
